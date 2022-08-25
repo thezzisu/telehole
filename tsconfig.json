@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "useDefineForClassFields": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "sourceMap": true,
+    "declaration": true,
+    "esModuleInterop": true,
+    "incremental": true,
+    "composite": true,
+    "skipLibCheck": true,
+    "stripInternal": true,
+    "outDir": "lib",
+    "rootDir": "src",
+  },
+  "include": [
+    "src/**/*.ts"
+  ]
+}
