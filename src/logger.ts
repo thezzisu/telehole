@@ -4,6 +4,8 @@ import { inspect } from 'util'
 function toStr(whatever: unknown) {
   return typeof whatever === 'string'
     ? whatever
+    : whatever instanceof Error
+    ? whatever.stack ?? `${whatever}`
     : inspect(whatever, undefined, null)
 }
 
@@ -16,13 +18,18 @@ function normalize(message: unknown) {
 }
 
 export function info(message: unknown) {
-  console.log(chalk.blue(`[+]`) + normalize(message))
+  console.log(chalk.blue(`[+]` + normalize(message)))
 }
 
 export function warn(message: unknown) {
-  console.log(chalk.yellow(`[!]`) + normalize(message))
+  console.log(chalk.yellow(`[!]` + normalize(message)))
 }
 
 export function error(message: unknown) {
-  console.log(chalk.red(`[-]`) + normalize(message))
+  console.log(chalk.red(`[-]` + normalize(message)))
+}
+
+export function fatal(message: unknown) {
+  console.log(chalk.bgRedBright.whiteBright(`[/]` + normalize(message)))
+  process.exit(1)
 }

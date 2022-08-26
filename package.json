@@ -17,6 +17,7 @@
   "dependencies": {
     "chalk": "^5.0.1",
     "dotenv": "^16.0.1",
+    "mongodb": "^4.9.0",
     "telegraf": "^4.8.6"
   },
   "scripts": {

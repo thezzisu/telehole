@@ -1,183 +1,142 @@
 import { Telegraf } from 'telegraf'
 import { Message, CommonMessageBundle } from 'typegram'
-import { error, info, warn } from './logger.js'
-import {
-  HoleSession,
-  MemoryStorage,
-  SessionState,
-  UserSession
-} from './session.js'
+import { decodeCbQuery } from './cbquery.js'
+import { HoleSession, UserSession, UserSessionState } from './db.js'
+import { enter, handlePrivateMessage, userInit } from './handler.js'
+import { error, fatal, info, warn } from './logger.js'
+import { STR_HELP } from './strings.js'
 
-async function start(token: string, channel: string) {
-  const userStorage = new MemoryStorage<number, UserSession>()
-  const holeStorage = new MemoryStorage<number, HoleSession>()
+const BOT_TOKEN = process.env.HOLE_BOT_TOKEN!
+if (!BOT_TOKEN) fatal('HOLE_BOT_TOKEN is not set')
+const CHANNEL = process.env.HOLE_CHANNEL!
+if (!CHANNEL) fatal('HOLE_CHANNEL is not set')
 
-  const bot = new Telegraf(token)
-  const channelInfo = await bot.telegram.getChat(channel)
-  const channelId = channelInfo.id
-  if (channelInfo.type !== 'channel') {
-    throw new Error('Channel is not a channel')
-  }
-  const _discussionId = channelInfo.linked_chat_id
-  if (!_discussionId) {
-    throw new Error('Channel is not linked to a discussion')
-  }
-  const discussionId = _discussionId
-  const discussionInfo = await bot.telegram.getChat(discussionId)
-  if (discussionInfo.type !== 'supergroup') {
-    throw new Error('Discussion is not a supergroup')
-  }
-  info(`Operate on ${channelInfo.title}/${discussionInfo.title}`)
+const bot = new Telegraf(BOT_TOKEN)
+const channelInfo = await bot.telegram.getChat('@' + CHANNEL)
 
-  bot.start((ctx) => {
-    switch (ctx.chat.type) {
-      case 'private':
-        ctx.reply('Welcome to TeleHole Bot')
-        break
-      default:
-        ctx.reply('TeleHole Bot currently only works in private chats')
-    }
-  })
-  bot.command('cancel', async (ctx, next) => {
-    if (ctx.chat.type !== 'private') return next()
-    const session = await UserSession.get(userStorage, ctx.chat.id)
-    await session.enter(SessionState.IDLE)
-    ctx.replyWithMarkdown(`Operation canceled.`)
-  })
-  bot.command('post', async (ctx, next) => {
-    if (ctx.chat.type !== 'private') return next()
-    const session = await UserSession.get(userStorage, ctx.chat.id)
-    await session.enter(SessionState.POST)
-    ctx.replyWithMarkdown(
-      `Enter post mode, your **next message** will be posted.`
-    )
-  })
-  bot.command('reply', async (ctx, next) => {
-    if (ctx.chat.type !== 'private') return next()
-    const session = await UserSession.get(userStorage, ctx.chat.id)
-    await session.enter(SessionState.PREPARE_REPLY)
-    ctx.replyWithMarkdown(
-      `Enter reply mode, your **next message** will be posted.`
-    )
-  })
-  bot.command('debug', async (ctx, next) => {
-    if (ctx.chat.type !== 'private') return next()
-    const session = await UserSession.get(userStorage, ctx.chat.id)
-    ctx.replyWithMarkdownV2(
-      '```\n' + JSON.stringify(session, null, '  ') + '\n```\n'
-    )
-  })
-  bot.help((ctx) => ctx.reply('If you are smart enough, you can use me'))
-
-  await bot.launch()
-  process.once('SIGINT', () => bot.stop('SIGINT'))
-  process.once('SIGTERM', () => bot.stop('SIGTERM'))
-
-  await bot.telegram.setMyCommands([
-    { command: 'post', description: 'Post a new hole' },
-    { command: 'reply', description: 'Reply to a hole' },
-    { command: 'cancel', description: 'Cancel a operation' }
-  ])
-
-  bot.on('channel_post', (ctx) => {
-    console.log(ctx.message)
-  })
-
-  bot.on('message', async (ctx, next) => {
-    if (ctx.senderChat?.id !== channelId) return next()
-    const msg = ctx.message as Message.CommonMessage
-    if (!msg.is_automatic_forward) return next()
-    // This message is a forwarded message from the channel
-    await bot.telegram.sendMessage(
-      discussionId,
-      `Hole ID is \`${msg.message_id}\`, use this ID to reply\\.`,
-      {
-        reply_to_message_id: msg.message_id,
-        parse_mode: 'MarkdownV2'
-      }
-    )
-  })
-
-  async function forward(
-    message: Message,
-    dest: number,
-    target?: number,
-    name?: string
-  ) {
-    if ('text' in message) {
-      return bot.telegram.sendMessage(dest, message.text, {
-        reply_to_message_id: target,
-        reply_markup: name
-          ? {
-              inline_keyboard: [
-                [{ text: `From: ${name}`, callback_data: `some_data` }]
-              ]
-            }
-          : undefined
-      })
-    } else if ('sticker' in message) {
-      return bot.telegram.sendSticker(dest, message.sticker.file_id, {
-        reply_to_message_id: target
-      })
-    }
-    throw new Error('Unsupported message type')
-  }
-
-  bot.on('message', async (ctx, next) => {
-    if (ctx.chat.type !== 'private') return next()
-    try {
-      const session = await UserSession.get(userStorage, ctx.chat.id)
-      const msg = ctx.message as CommonMessageBundle
-      switch (session.state) {
-        case SessionState.IDLE:
-          return next()
-
-        case SessionState.POST:
-          await forward(msg, channelId)
-          await session.enter(SessionState.IDLE)
-          return ctx.reply(`OK`)
-
-        case SessionState.PREPARE_REPLY:
-          if (!('text' in msg)) throw new Error('Message is not a text')
-          const msgId = parseInt(msg.text)
-          if (isNaN(msgId)) throw new Error('Message is not a number')
-          session.target = msgId
-          await session.enter(SessionState.REPLY)
-          return ctx.reply(`OK`)
-
-        case SessionState.REPLY:
-          try {
-            const hole = await HoleSession.get(holeStorage, session.target)
-            if (!(ctx.chat.id in hole.mapping)) {
-              hole.mapping[ctx.chat.id] = Object.keys(hole.mapping).length
-              await hole.save()
-            }
-            const ord = hole.mapping[ctx.chat.id]
-            const name = ord ? `No. ${ord}` : `Hole creator`
-            await forward(msg, discussionId, session.target, name)
-            ctx.reply(`OK`)
-          } catch (err) {
-            ctx.reply(`${err}`)
-          }
-          await session.enter(SessionState.IDLE)
-          return
-        default:
-          return ctx.reply('Not supported')
-      }
-    } catch (err) {
-      return ctx.reply(`${err}`)
-    }
-  })
-
-  await bot.telegram.sendMessage(channelId, 'Hole Bot is online')
-  info('Bot is online')
+export const channelId = channelInfo.id
+if (channelInfo.type !== 'channel') {
+  throw new Error('Channel is not a channel')
 }
+export const channelName = channelInfo.username
+if (!channelName) {
+  throw new Error('Channel has no username')
+}
+export const discussionId = channelInfo.linked_chat_id!
+if (!discussionId) {
+  throw new Error('Channel is not linked to a discussion')
+}
+const discussionInfo = await bot.telegram.getChat(discussionId)
+if (discussionInfo.type !== 'supergroup') {
+  throw new Error('Discussion is not a supergroup')
+}
+info(
+  `Operate on:\n${channelInfo.title}(${channelId})\n${discussionInfo.title}(${discussionId})`
+)
 
-const BOT_TOKEN = process.env.HOLE_BOT_TOKEN
-const CHANNEL = process.env.HOLE_CHANNEL
-if (!BOT_TOKEN || !CHANNEL) process.exit(1)
-
-start(BOT_TOKEN, CHANNEL).catch((err) => {
-  error(err.stack)
-  process.exit(-1)
+bot.start(async (ctx) => {
+  switch (ctx.chat.type) {
+    case 'private':
+      await userInit(ctx.message.from.id, ctx.chat.id)
+      ctx.replyWithMarkdownV2('Welcome to **TeleHole Bot**')
+      break
+    default:
+      ctx.reply('TeleHole Bot currently only works in private chats')
+  }
 })
+bot.command('cancel', async (ctx, next) => {
+  if (ctx.chat.type !== 'private') return next()
+  await enter(ctx.message.from.id, UserSessionState.IDLE)
+  ctx.replyWithMarkdown(`Operation canceled.`)
+})
+bot.command('post', async (ctx, next) => {
+  if (ctx.chat.type !== 'private') return next()
+  await enter(ctx.message.from.id, UserSessionState.POST)
+  ctx.reply(`Your next message will be posted.`)
+})
+bot.command('reply', async (ctx, next) => {
+  if (ctx.chat.type !== 'private') return next()
+  await enter(ctx.message.from.id, UserSessionState.REPLY_0)
+  ctx.reply(`Please enter the message ID that you want to reply.`)
+})
+bot.command('debug', async (ctx, next) => {
+  if (ctx.chat.type !== 'private') return next()
+  const session = await UserSession.findOne({ userId: ctx.message.from.id })
+  ctx.replyWithMarkdownV2(
+    '```\n' + JSON.stringify(session, null, '  ') + '\n```\n'
+  )
+})
+bot.help((ctx) => ctx.replyWithMarkdownV2(STR_HELP))
+
+await bot.launch()
+
+process.once('SIGINT', () => bot.stop('SIGINT'))
+process.once('SIGTERM', () => bot.stop('SIGTERM'))
+
+await bot.telegram.setMyCommands([
+  { command: 'post', description: 'Post a new hole' },
+  { command: 'reply', description: 'Reply to a hole' },
+  { command: 'cancel', description: 'Cancel a operation' }
+])
+
+bot.on('message', async (ctx, next) => {
+  if (ctx.senderChat?.id !== channelId) return next()
+  const msg = ctx.message as Message.CommonMessage
+  if (!msg.is_automatic_forward) return next()
+  const channelMsgId = msg.forward_from_message_id
+  if (!channelMsgId) {
+    warn(`Message ${msg.message_id} is not forwarded`)
+    return
+  }
+  // This message is a forwarded message from the channel
+  await HoleSession.updateOne(
+    { channelMsgId },
+    { $set: { msgId: msg.message_id } },
+    { upsert: true }
+  )
+  info(`Created hole for ${msg.message_id}`)
+  await bot.telegram.sendMessage(
+    discussionId,
+    `Hole ID is \`${msg.message_id}\`, use this ID to reply\\.`,
+    {
+      reply_to_message_id: msg.message_id,
+      parse_mode: 'MarkdownV2'
+    }
+  )
+})
+
+bot.on('message', async (ctx, next) => {
+  if (ctx.chat.type !== 'private') return next()
+  return handlePrivateMessage(ctx, ctx.message.from.id, ctx.message)
+})
+
+bot.on('callback_query', async (ctx) => {
+  if (!ctx.callbackQuery.data) return
+  const data = decodeCbQuery(ctx.callbackQuery.data)
+  switch (data.type) {
+    case 'notify':
+      return ctx.answerCbQuery(data.text)
+    case 'reply':
+      const resp = await UserSession.findOneAndUpdate(
+        { userId: ctx.callbackQuery.from.id },
+        {
+          $set: {
+            state: UserSessionState.REPLY_1,
+            replyMsgId: data.replyMsgId,
+            replyTarget: data.replyTarget
+          }
+        },
+        { returnDocument: 'after' }
+      )
+      if (resp.value) {
+        await ctx.telegram.sendMessage(
+          resp.value.chatId,
+          `You are replying to hole \`${data.replyMsgId}\` Please enter your reply:`,
+          { parse_mode: 'MarkdownV2' }
+        )
+      }
+      return ctx.answerCbQuery('Goto bot and reply')
+  }
+})
+
+info('Bot is online')
