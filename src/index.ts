@@ -76,7 +76,8 @@ process.once('SIGTERM', () => bot.stop('SIGTERM'))
 await bot.telegram.setMyCommands([
   { command: 'post', description: 'Post a new hole' },
   { command: 'reply', description: 'Reply to a hole' },
-  { command: 'cancel', description: 'Cancel a operation' }
+  { command: 'cancel', description: 'Cancel a operation' },
+  { command: 'help', description: 'Help me' }
 ])
 
 bot.on('message', async (ctx, next) => {
