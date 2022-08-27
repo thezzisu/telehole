@@ -1,10 +1,9 @@
 import { Telegraf } from 'telegraf'
-import { Message, CommonMessageBundle } from 'typegram'
-import { decodeCbQuery } from './cbquery.js'
+import { Message } from 'typegram'
+import { decodeCbQuery, encodeCbQuery } from './cbquery.js'
 import { HoleSession, UserSession, UserSessionState } from './db.js'
 import { enter, handlePrivateMessage, userInit } from './handler.js'
-import { error, fatal, info, warn } from './logger.js'
-import { STR_HELP } from './strings.js'
+import { fatal, info, warn } from './logger.js'
 
 const BOT_TOKEN = process.env.HOLE_BOT_TOKEN!
 if (!BOT_TOKEN) fatal('HOLE_BOT_TOKEN is not set')
@@ -66,7 +65,18 @@ bot.command('debug', async (ctx, next) => {
     '```\n' + JSON.stringify(session, null, '  ') + '\n```\n'
   )
 })
-bot.help((ctx) => ctx.replyWithMarkdownV2(STR_HELP))
+bot.help((ctx) =>
+  ctx.replyWithMarkdownV2(`**TeleHole Bot Help**
+Please join [the channel](https://t.me/${channelName}) first\\.
+\`\`\`
+Usage:
+
+/post   - Post a new hole
+/reply  - Reply to a hole/reply
+/cancel - Cancel the current operation
+\`\`\`
+`)
+)
 
 await bot.launch()
 
@@ -101,7 +111,21 @@ bot.on('message', async (ctx, next) => {
     `Hole ID is \`${msg.message_id}\`, use this ID to reply\\.`,
     {
       reply_to_message_id: msg.message_id,
-      parse_mode: 'MarkdownV2'
+      parse_mode: 'MarkdownV2',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: 'Reply',
+              callback_data: encodeCbQuery({
+                type: 'reply',
+                replyMsgId: msg.message_id,
+                replyTarget: 0
+              })
+            }
+          ]
+        ]
+      }
     }
   )
 })

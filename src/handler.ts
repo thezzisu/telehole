@@ -87,14 +87,21 @@ const UserStatefulHandlers: Record<UserSessionState, IUserStatefulHandler> = {
         )
       } else if ('text' in message) {
         promise = ctx.telegram.sendMessage(channelId, message.text, {
-          entities: message.entities
+          entities: message.entities,
+          reply_to_message_id: message.reply_to_message?.message_id
         })
       } else if ('sticker' in message) {
-        promise = ctx.telegram.sendSticker(channelId, message.sticker.file_id)
+        promise = ctx.telegram.sendSticker(channelId, message.sticker.file_id, {
+          reply_to_message_id: message.reply_to_message?.message_id
+        })
       } else if ('photo' in message) {
-        promise = ctx.telegram.sendPhoto(channelId, message.photo[0].file_id)
+        promise = ctx.telegram.sendPhoto(channelId, message.photo[0].file_id, {
+          reply_to_message_id: message.reply_to_message?.message_id
+        })
       } else if ('video' in message) {
-        promise = ctx.telegram.sendVideo(channelId, message.video.file_id)
+        promise = ctx.telegram.sendVideo(channelId, message.video.file_id, {
+          reply_to_message_id: message.reply_to_message?.message_id
+        })
       } else {
         throw new Error('Unsupported message type')
       }
