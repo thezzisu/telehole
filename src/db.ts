@@ -12,6 +12,7 @@ export interface IUserSession {
   userId: number
   chatId: number
   state: UserSessionState
+  authorized?: boolean
   replyMsgId?: number
   replyTarget?: number
 }
