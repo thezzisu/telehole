@@ -4,7 +4,7 @@ import { Message } from 'typegram'
 import { decodeCbQuery, encodeCbQuery } from './cbquery.js'
 import { HoleSession, UserSession, UserSessionState } from './db.js'
 import { enter, handlePrivateMessage, userInit } from './handler.js'
-import { fatal, info, warn } from './logger.js'
+import { debug, fatal, info, warn } from './logger.js'
 import { RequireAuthorized } from './middlewares.js'
 
 const BOT_TOKEN = process.env.HOLE_BOT_TOKEN!
@@ -119,6 +119,7 @@ bot.on('message', async (ctx, next) => {
   if (ctx.senderChat?.id !== channelId) return next()
   const msg = ctx.message as Message.CommonMessage
   if (!msg.is_automatic_forward) return next()
+  debug(msg)
   const channelMsgId = msg.forward_from_message_id
   if (!channelMsgId) {
     warn(`Message ${msg.message_id} is not forwarded`)

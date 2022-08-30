@@ -7,8 +7,9 @@
 
 ## Usage
 
-### From code
-Just set the following environment variables:
+### Configuration
+
+Configuration is done by setting the following environment variables.
 
 ```ini
 HOLE_BOT_TOKEN=<Bot Token>
@@ -17,4 +18,12 @@ HOLE_MONGO_URL=<MongoDB URL>
 HOLE_MONGO_DB=<MongoDB Database>
 ```
 
-Then run the program using `yarn start`.
+### Docker
+
+```sh
+docker run --env-file .env --restart always -d ghcr.io/thezzisu/telehole
+```
+
+### From code
+
+Run the program using `yarn start`.

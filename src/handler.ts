@@ -8,7 +8,8 @@ import {
   UserSessionState
 } from './db.js'
 import { channelId, channelName, discussionId } from './index.js'
-import { warn } from './logger.js'
+import { debug, warn } from './logger.js'
+import { getName } from './names.js'
 
 export async function userInit(userId: number, chatId: number) {
   await UserSession.updateOne(
@@ -57,7 +58,7 @@ async function updateReplyInlineKeyboard(
     inline_keyboard: [
       [
         {
-          text: `Reply to ${tid}`,
+          text: `Reply to ${getName(tid)}`,
           callback_data: encodeCbQuery({
             type: 'reply',
             replyMsgId: holeMsgId,
@@ -76,13 +77,10 @@ const UserStatefulHandlers: Record<UserSessionState, IUserStatefulHandler> = {
   async [UserSessionState.POST](ctx, userId, message) {
     try {
       let promise: Promise<Message>
-      if ('forward_from' in message) {
-        const fromChatId = message.forward_from_chat?.id
-        if (!fromChatId)
-          throw new Error('You must forward a message from a chat')
+      if ('forward_date' in message) {
         promise = ctx.telegram.forwardMessage(
           channelId,
-          fromChatId,
+          message.chat.id,
           message.message_id
         )
       } else if ('text' in message) {
@@ -96,12 +94,26 @@ const UserStatefulHandlers: Record<UserSessionState, IUserStatefulHandler> = {
         })
       } else if ('photo' in message) {
         promise = ctx.telegram.sendPhoto(channelId, message.photo[0].file_id, {
-          reply_to_message_id: message.reply_to_message?.message_id
+          reply_to_message_id: message.reply_to_message?.message_id,
+          caption: message.caption,
+          caption_entities: message.caption_entities
         })
       } else if ('video' in message) {
         promise = ctx.telegram.sendVideo(channelId, message.video.file_id, {
-          reply_to_message_id: message.reply_to_message?.message_id
+          reply_to_message_id: message.reply_to_message?.message_id,
+          caption: message.caption,
+          caption_entities: message.caption_entities
         })
+      } else if ('document' in message) {
+        promise = ctx.telegram.sendDocument(
+          channelId,
+          message.document.file_id,
+          {
+            reply_to_message_id: message.reply_to_message?.message_id,
+            caption: message.caption,
+            caption_entities: message.caption_entities
+          }
+        )
       } else {
         throw new Error('Unsupported message type')
       }
@@ -112,7 +124,8 @@ const UserStatefulHandlers: Record<UserSessionState, IUserStatefulHandler> = {
         { upsert: true }
       )
       await ctx.reply(
-        `Hole created:\n\nhttps://t.me/${channelName}/${msg.message_id}`
+        `Hole created:\n\nhttps://t.me/${channelName}/${msg.message_id}`,
+        { reply_to_message_id: message.message_id }
       )
     } catch (err) {
       await ctx.reply(`${err}`)
@@ -192,21 +205,37 @@ const UserStatefulHandlers: Record<UserSessionState, IUserStatefulHandler> = {
           message.photo[0].file_id,
           {
             reply_to_message_id,
-            reply_markup: makeReplyInlineKeyboard(tid)
+            reply_markup: makeReplyInlineKeyboard(tid),
+            caption: message.caption,
+            caption_entities: message.caption_entities
           }
         )
       } else if ('video' in message) {
         promise = ctx.telegram.sendVideo(discussionId, message.video.file_id, {
           reply_to_message_id,
-          reply_markup: makeReplyInlineKeyboard(tid)
+          reply_markup: makeReplyInlineKeyboard(tid),
+          caption: message.caption,
+          caption_entities: message.caption_entities
         })
+      } else if ('document' in message) {
+        promise = ctx.telegram.sendDocument(
+          discussionId,
+          message.document.file_id,
+          {
+            reply_to_message_id,
+            reply_markup: makeReplyInlineKeyboard(tid),
+            caption: message.caption,
+            caption_entities: message.caption_entities
+          }
+        )
       } else {
         throw new Error('Unsupported message type')
       }
       const msg = await promise
       await updateReplyInlineKeyboard(ctx, replyMsgId, msg.message_id, tid)
       await ctx.reply(
-        `Well done.\n\nGoto the hole: https://t.me/${channelName}/${hole.channelMsgId}`
+        `Well done.\n\nGoto the hole: https://t.me/${channelName}/${hole.channelMsgId}`,
+        { reply_to_message_id: message.message_id }
       )
     } catch (err) {
       await ctx.reply(`${err}`)
@@ -221,6 +250,7 @@ export async function handlePrivateMessage(
   message: Message
 ) {
   try {
+    debug(message)
     const session = await UserSession.findOne({ userId })
     if (!session) return ctx.reply('Please run /start command first')
     const handler = UserStatefulHandlers[session.state]

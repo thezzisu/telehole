@@ -33,3 +33,9 @@ export function fatal(message: unknown) {
   console.log(chalk.bgRedBright.whiteBright(`[/]` + normalize(message)))
   process.exit(1)
 }
+
+export function debug(message: unknown) {
+  if (process.env.HOLE_DEBUG) {
+    console.log(chalk.gray(`[#]` + normalize(message)))
+  }
+}
